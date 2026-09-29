@@ -1,0 +1,30 @@
+# Courtside in Docker.
+#
+#   cp .env.example .env        # then set JWT_SECRET (and the DB settings if yours differ)
+#   docker compose up -d --build
+#
+# By default the app uses a MySQL you already run (e.g. the local `mysql` container on :3306),
+# reached from inside the container as host.docker.internal. To run MySQL alongside it instead
+# (e.g. on a server), set DB_HOST=db in .env and add the `db` profile. Its data lives in the
+# `db-data` volume; the app connects as DB_USER, so no root password is needed (a random one is set).
+#
+#   docker compose --profile db up -d --build
+#
+# Migrations run automatically when the app starts.
+
+services:
+  app:
+    build: .
+    image: badminton-tracker
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:4000"
+    environment:
+      PORT: 4000
+      DB_HOST: ${DB_HOST:-host.docker.internal}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER:-badminton}
+      DB_PASSWORD: ${DB_PASSWORD:-badminton}
+      DB_NAME: ${DB_NAME:-badminton_tracker}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env (e.g. openssl rand -hex 32)}
+
