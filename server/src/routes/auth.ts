@@ -11,6 +11,18 @@ export const authRouter = Router();
 const email = z.string().trim().toLowerCase().email().max(190);
 const password = z.string().min(8).max(200);
 
+/**
+ * Public: a page load the web app sends the browser to when an API call was redirected to a login
+ * page by a proxy in front of the app (Cloudflare Access, once its session has expired). Loading it
+ * as a page lets the proxy run its login; afterwards it lands here again and is sent back into the
+ * app. The PWA's offline cache never serves /api/ URLs, so this always reaches the network.
+ */
+authRouter.get('/auth/cloudflare', (req, res) => {
+  const back = typeof req.query.return === 'string' ? req.query.return : '/';
+  // Only paths on this site: "/x", not "//evil.com" or "/\\evil.com".
+  res.redirect(302, /^\/(?![/\\])/.test(back) ? back : '/');
+});
+
 /** Public: which group an invite code belongs to, so the join screen can name it. */
 authRouter.get('/invites/:code', async (req, res) => {
   const g = await groupForCode(pool, String(req.params.code));

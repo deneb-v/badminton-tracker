@@ -226,6 +226,47 @@ export function onAuthChange(fn: () => void): () => void {
   };
 }
 
+// --- Cloudflare Access ---------------------------------------------------
+//
+// When the app runs behind Cloudflare Access and its session has expired, Access answers API calls
+// with a redirect to its login page on another domain, which fetch() can't follow (it shows up as a
+// CORS error). The app's own API never redirects, so a redirect means exactly that: send the whole
+// page through Access's login via /api/auth/cloudflare, which brings the browser back to where it was.
+
+const REAUTH_KEY = 'bt.accessReauthAt';
+const REAUTH_COOLDOWN_MS = 60_000;
+
+/** An API call was intercepted by Cloudflare Access; the page is being sent to its login. */
+export class AccessRedirectError extends ApiError {
+  constructor(message: string) {
+    super(0, message, 'ACCESS_LOGIN');
+  }
+}
+
+function accessLogin(): AccessRedirectError {
+  let last = 0;
+  try {
+    last = Number(sessionStorage.getItem(REAUTH_KEY) ?? 0);
+  } catch {
+    // Storage unavailable: no loop guard, still try the login.
+  }
+  // Just came back from the login and still blocked: stop rather than loop.
+  if (Date.now() - last < REAUTH_COOLDOWN_MS) {
+    return new AccessRedirectError('Cloudflare Access is still blocking the app. Sign in to Cloudflare again, then reload.');
+  }
+  try {
+    sessionStorage.setItem(REAUTH_KEY, String(Date.now()));
+  } catch {
+    /* ignore */
+  }
+  const here = location.pathname + location.search;
+  // After this tick, so a write being queued for later (sendOrQueue) is saved first.
+  setTimeout(() => location.assign(`/api/auth/cloudflare?return=${encodeURIComponent(here)}`), 0);
+  return new AccessRedirectError('Your Cloudflare sign-in expired — taking you to sign in again…');
+}
+
+export const isAccessRedirect = (e: unknown) => e instanceof AccessRedirectError;
+
 // --- requests ------------------------------------------------------------
 
 async function raw<T>(method: string, url: string, body?: unknown): Promise<T> {
@@ -237,7 +278,10 @@ async function raw<T>(method: string, url: string, body?: unknown): Promise<T> {
       ...(token && { Authorization: `Bearer ${token}` }),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
+    // Don't follow redirects: the API never sends one, so a redirect is Cloudflare Access's login.
+    redirect: 'manual',
   });
+  if (res.type === 'opaqueredirect') throw accessLogin();
   if (res.status === 401 && token) setToken(null);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -319,7 +363,8 @@ export async function sendOrQueue<T>(op: Omit<OutboxOp, 'id'>): Promise<T | null
     try {
       return await raw<T>(op.method, op.url, body);
     } catch (e) {
-      if (!isNetworkError(e)) throw e;
+      // Offline, or Cloudflare Access needs a sign-in first: keep the tap and send it afterwards.
+      if (!isNetworkError(e) && !isAccessRedirect(e)) throw e;
     }
   }
   writeOutbox([...readOutbox(), { ...op, body, id: crypto.randomUUID() }]);
@@ -339,7 +384,7 @@ export async function flushOutbox(): Promise<void> {
         await raw(op.method, op.url, op.body);
         lastSyncError = null;
       } catch (e) {
-        if (isNetworkError(e)) break;
+        if (isNetworkError(e) || isAccessRedirect(e)) break;
         lastSyncError = `A change made offline couldn't be applied: ${(e as Error).message}`;
       }
       writeOutbox(readOutbox().filter((x) => x.id !== op.id));

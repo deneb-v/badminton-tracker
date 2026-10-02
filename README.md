@@ -42,6 +42,10 @@ docker compose up -d --build  # http://localhost:8080
 
 By default it uses a MySQL you already run on this machine (reached as `host.docker.internal:3306`). To run MySQL alongside it instead, e.g. on a server, set `DB_HOST=db` (and a real `DB_PASSWORD`) in `.env` and start with `docker compose --profile db up -d --build`; the data lives in the `db-data` volume.
 
+### Behind Cloudflare Access
+
+The app works behind a Cloudflare Access (Zero Trust) application covering the whole hostname. Because it's a PWA, the page can open from the browser's cache without passing Access, so once the Access session expires, API calls get redirected to Access's login (which a browser reports as a CORS error). The app spots that redirect and sends the page through `/api/auth/cloudflare`, so Access shows its login and then returns to the same screen. Taps made meanwhile (Start, Done, attendance) are kept and sent afterwards. If Access still blocks right after, the app shows an error instead of looping. Alternatively, a Bypass policy for `/api/*` avoids the round trip, since the API has its own login.
+
 ## Decisions taken from the open items
 
 | Item | Decision |

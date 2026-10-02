@@ -310,6 +310,16 @@ describe('multi-admin', () => {
 type P = { id: number };
 const ids = (m: { sideA: P[]; sideB: P[] }) => [...m.sideA, ...m.sideB].map((p) => p.id);
 
+describe('Cloudflare Access re-login', () => {
+  it('sends the browser back into the app, but only to a path on this site', async () => {
+    const back = async (ret?: string) =>
+      (await request(app).get('/api/auth/cloudflare').query(ret === undefined ? {} : { return: ret })).headers.location;
+    expect(await back('/g/2/s/9?tab=plan')).toBe('/g/2/s/9?tab=plan');
+    expect(await back()).toBe('/');
+    for (const evil of ['//evil.com', '/\\evil.com', 'https://evil.com', 'evil.com']) expect(await back(evil)).toBe('/');
+  });
+});
+
 describe('groups & invites', () => {
   it('open sign-up is gone; players join with the invite code', async () => {
     const reg = await request(app).post('/api/auth/register').send({ email: `x${suffix}@t.dev`, password: 'password1', name: 'X' });
